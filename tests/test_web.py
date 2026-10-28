@@ -294,6 +294,18 @@ def test_run_endpoint_starts_an_analysis(wired):
     assert client.post("/api/run").json()["status"] == "started"
 
 
+def test_run_endpoint_says_why_it_refuses_a_second_run(wired, monkeypatch):
+    """The UI waits on the running analysis; a bare "HTTP 409" told the user nothing."""
+    client, _store, runner, _ha = wired
+    monkeypatch.setattr(type(runner), "is_running", property(lambda self: True))
+    response = client.post("/api/run")
+    assert response.status_code == 409
+    assert response.json() == {
+        "status": "already_running",
+        "detail": "An analysis is already running.",
+    }
+
+
 def test_candidate_round_trips_through_the_store(wired):
     client, store, _runner, _ha = wired
     actionable = [s for s in store.list_suggestions(status="new") if s["payload"].get("actions")]

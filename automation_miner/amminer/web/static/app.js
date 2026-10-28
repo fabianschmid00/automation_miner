@@ -25,7 +25,9 @@
     }).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (body) {
         if (!response.ok) {
-          throw new Error(body.detail || body.error || ("HTTP " + response.status));
+          var error = new Error(body.detail || body.error || ("HTTP " + response.status));
+          error.body = body;
+          throw error;
         }
         return body;
       });
@@ -190,14 +192,17 @@
     runButton.addEventListener("click", function () {
       runButton.disabled = true;
       runButton.textContent = "Analysing…";
-      post("/api/run").then(function (result) {
-        if (result.status === "already_running") {
-          notify("An analysis is already running.");
-        } else {
-          notify("Analysis started. This page will refresh when it finishes.");
-          pollUntilDone();
-        }
+      post("/api/run").then(function () {
+        notify("Analysis started. This page will refresh when it finishes.");
+        pollUntilDone();
       }).catch(function (error) {
+        // The server answers 409 while a run (often the one started at boot)
+        // is in progress: wait for that one instead of reporting a failure.
+        if (error.body && error.body.status === "already_running") {
+          notify("An analysis is already running. This page will refresh when it finishes.");
+          pollUntilDone();
+          return;
+        }
         notify(error.message, true);
         runButton.disabled = false;
         runButton.textContent = "Analyse now";

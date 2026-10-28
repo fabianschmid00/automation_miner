@@ -229,7 +229,10 @@ def create_app(
         if runner is None:
             raise HTTPException(status_code=503, detail="no analysis runner available")
         if runner.is_running:
-            return JSONResponse({"status": "already_running"}, status_code=409)
+            return JSONResponse(
+                {"status": "already_running", "detail": "An analysis is already running."},
+                status_code=409,
+            )
         asyncio.get_running_loop().run_in_executor(None, runner.run_now)
         return {"status": "started"}
 

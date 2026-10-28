@@ -141,3 +141,17 @@ def test_same_queries_run_on_mariadb(fixture_db):
     assert rows
     assert any(r.context_user_id for r in rows)
     engine.dispose()
+
+
+def test_rows_sharing_an_attributes_id_share_one_decoded_dict(raw_changes):
+    """Decoding the same JSON once per row is what ran a real home out of memory."""
+    temps = [c for c in raw_changes if c.entity_id == "sensor.outdoor_temperature"]
+    distinct = {id(c.attributes) for c in temps}
+    assert len(temps) > 1
+    assert len(distinct) < len(temps)
+
+
+def test_repeated_strings_are_interned(raw_changes):
+    kitchen = [c for c in raw_changes if c.entity_id == "light.kitchen"]
+    assert len(kitchen) > 1
+    assert all(c.entity_id is kitchen[0].entity_id for c in kitchen)

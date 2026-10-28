@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.9.1
+
+**Fixed: the add-on was killed every ~10 minutes while loading history**
+
+On a large home (about 1,000 entities, a month of MariaDB history) the first
+analysis never finished. The process ran out of memory while it loaded the
+state rows, the kernel killed it, and the Supervisor restarted it. The log
+showed only `Service automation_miner exited with code 256`, and the next
+start marked the run as interrupted.
+
+The loader decoded the attributes JSON again for every row, although the
+recorder stores each distinct attribute set only once. Rows that share an
+`attributes_id` now share one decoded dict, and entity ids, states and user
+ids are interned. The load also logs its progress, and the service log now
+names the signal when the process is killed.
+
+**Fixed: "Analyse now" showed a bare `HTTP 409`**
+
+When an analysis was already running (usually the one started at boot), the
+button showed only `HTTP 409`. It now says that an analysis is already
+running, and the page waits for that run and refreshes when it finishes.
+
 ## 0.9.0
 
 **Added: a learned sequence model — `sequence_model_enabled` (OFF by default)**

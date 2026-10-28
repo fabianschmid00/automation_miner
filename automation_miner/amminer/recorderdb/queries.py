@@ -18,6 +18,7 @@ import binascii
 import json
 import logging
 from collections.abc import Iterable, Iterator, Sequence
+from sys import intern
 from typing import Any
 
 from sqlalchemy import bindparam, text
@@ -29,6 +30,9 @@ _LOGGER = logging.getLogger(__name__)
 
 #: Events that establish an automation/script origin for a context chain.
 ORIGIN_EVENT_TYPES = ("automation_triggered", "script_started")
+
+#: How often the state load reports progress, so a long load is visibly alive.
+PROGRESS_EVERY_ROWS = 500_000
 
 #: Recorder drops attributes larger than this; we never rely on big blobs.
 MAX_ATTRIBUTE_BYTES = 16 * 1024
@@ -104,10 +108,10 @@ class RecorderQueries:
             where_entity = "AND s.entity_id IN :entity_ids" if entity_filter else ""
 
         if with_attributes:
-            attr_select = "sa.shared_attrs AS attrs"
+            attr_select = "s.attributes_id AS attrs_id, sa.shared_attrs AS attrs"
             attr_join = "LEFT JOIN state_attributes sa ON s.attributes_id = sa.attributes_id"
         else:
-            attr_select = "NULL AS attrs"
+            attr_select = "NULL AS attrs_id, NULL AS attrs"
             attr_join = ""
 
         return f"""
@@ -137,7 +141,15 @@ class RecorderQueries:
         with_attributes: bool = False,
         chunk_size: int = 20000,
     ) -> Iterator[StateChange]:
-        """Stream ``StateChange`` rows in chronological order."""
+        """Stream ``StateChange`` rows in chronological order.
+
+        Rows that share an ``attributes_id`` share one decoded dict, and the
+        short, endlessly repeated strings are interned.  A month of history on
+        a thousand-entity home is millions of rows; decoding the same
+        attributes JSON afresh for each one took gigabytes, and the add-on was
+        killed for running out of memory before the load finished.  Nothing
+        downstream mutates ``StateChange.attributes``, so sharing is safe.
+        """
         params: dict[str, Any] = {"start_ts": start_ts, "end_ts": end_ts}
         entity_filter = bool(entity_ids)
         statement = text(self._states_sql(entity_filter, with_attributes))
@@ -147,6 +159,8 @@ class RecorderQueries:
             )
             params["entity_ids"] = list(entity_ids or [])
 
+        attribute_cache: dict[Any, dict[str, Any]] = {}
+        rows = 0
         with self.engine.connect().execution_options(
             stream_results=True, yield_per=chunk_size
         ) as conn:
@@ -155,19 +169,30 @@ class RecorderQueries:
                 state = mapping["state"]
                 if state is None:
                     continue
+                attrs_id = mapping["attrs_id"]
+                if attrs_id is None:
+                    attributes = _decode_attributes(mapping["attrs"])
+                else:
+                    attributes = attribute_cache.get(attrs_id)
+                    if attributes is None:
+                        attributes = _decode_attributes(mapping["attrs"])
+                        attribute_cache[attrs_id] = attributes
+                old_state = mapping["old_state"]
+                user_id = decode_context(mapping["ctx_user"])
+                rows += 1
+                if rows % PROGRESS_EVERY_ROWS == 0:
+                    _LOGGER.info("Loaded %d state rows so far", rows)
                 yield StateChange(
-                    entity_id=mapping["entity_id"],
-                    state=str(state),
+                    entity_id=intern(str(mapping["entity_id"])),
+                    state=intern(str(state)),
                     ts=float(mapping["ts"] or 0.0),
-                    old_state=(
-                        str(mapping["old_state"]) if mapping["old_state"] is not None else None
-                    ),
+                    old_state=intern(str(old_state)) if old_state is not None else None,
                     last_changed_ts=(
                         float(mapping["changed_ts"]) if mapping["changed_ts"] is not None else None
                     ),
-                    attributes=_decode_attributes(mapping["attrs"]),
+                    attributes=attributes,
                     context_id=decode_context(mapping["ctx"]),
-                    context_user_id=decode_context(mapping["ctx_user"]),
+                    context_user_id=intern(user_id) if user_id is not None else None,
                     context_parent_id=decode_context(mapping["ctx_parent"]),
                 )
 

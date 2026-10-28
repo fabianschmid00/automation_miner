@@ -160,6 +160,7 @@ class SyntheticRecorder:
         self.conn.executescript(SCHEMA)
         self._meta: dict[str, int] = {}
         self._event_types: dict[str, int] = {}
+        self._attribute_ids: dict[str, int] = {}
         self._last_state_id: dict[str, int] = {}
         self.truth = Injected()
 
@@ -195,11 +196,18 @@ class SyntheticRecorder:
         if not attributes:
             return None
         payload = json.dumps(attributes, sort_keys=True)
+        # The recorder stores each distinct attribute set once and points every
+        # state row at it; the fixture does the same so the loader is tested
+        # against the sharing a real database has.
+        cached = self._attribute_ids.get(payload)
+        if cached is not None:
+            return cached
         cursor = self.conn.execute(
             "INSERT INTO state_attributes(hash, shared_attrs) VALUES(?, ?)",
             (hash(payload) & 0x7FFFFFFF, payload),
         )
-        return int(cursor.lastrowid)
+        self._attribute_ids[payload] = int(cursor.lastrowid)
+        return self._attribute_ids[payload]
 
     # ------------------------------------------------------------------
     def add_state(
