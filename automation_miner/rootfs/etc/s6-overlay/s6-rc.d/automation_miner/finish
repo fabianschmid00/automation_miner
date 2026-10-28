@@ -8,7 +8,13 @@ readonly exit_code_signal="${2}"
 exit_code_container="$(</run/s6-linux-init-container-results/exitcode 2>/dev/null || echo 0)"
 readonly exit_code_container
 
-bashio::log.info "Service automation_miner exited with code ${exit_code_service}"
+if [[ "${exit_code_service}" -eq 256 ]]; then
+    # 256 means "killed by a signal". Name it: signal 9 with no shutdown log
+    # is almost always the kernel's out-of-memory killer.
+    bashio::log.warning "Service automation_miner was killed by signal ${exit_code_signal}"
+else
+    bashio::log.info "Service automation_miner exited with code ${exit_code_service}"
+fi
 
 if [[ "${exit_code_service}" -eq 256 ]]; then
     if [[ "${exit_code_container}" -eq 0 ]]; then

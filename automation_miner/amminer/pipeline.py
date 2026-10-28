@@ -271,6 +271,7 @@ def run_analysis(
             resolver.seed_from_recorder(queries.entity_ids())
             report.entities = resolver.stats()
 
+        _LOGGER.info("Loading %.1f days of state history", (end_ts - start_ts) / 86400.0)
         changes = queries.state_changes(start_ts, end_ts, with_attributes=True)
         events = queries.events(start_ts, end_ts, ORIGIN_EVENT_TYPES)
         report.state_rows = len(changes)
